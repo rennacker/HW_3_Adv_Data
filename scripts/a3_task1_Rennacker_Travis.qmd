@@ -1,0 +1,290 @@
+---
+title: "HW_3_part_1"
+author: "Travis Rennacker"
+format: 
+  html: 
+    toc: true
+    code-fold: true
+    code-tools: true 
+    code-summary: "Show Code"
+    embed-resources: true
+execute:
+  warning: false 
+  message: false
+---
+ 
+# Overview  
+ 
+1.	An overview section with subsections that briefly summarize the dataset (this should include a well formatted data citation), the purpose of your analysis, and a pseudocode outline of the steps of your analysis.  Your writeup should look and feel professional in style, tone, and substance.
+
+
+
+```{r}
+library(tidyverse)
+library(patchwork)
+library(here)
+
+# Packages for cluster analysis:
+library(NbClust)
+library(cluster)
+library(factoextra)
+library(dendextend)
+library(ggdendro)
+
+```
+
+
+```{r}
+water_chem_raw <- read_csv(here("data", "sbc_lter_registered_stream_chemistry.csv"))
+
+water_chem_nine_nine <- water_chem_raw |> janitor::clean_names()
+```
+
+```{r}
+#| output: false 
+
+#get an idea of how many values.... wow a lot
+nine_nine_nine <- sum(water_chem_nine_nine == -999)
+
+nine_nine_nine
+
+water_chem <- water_chem_nine_nine |> summary(-999)
+
+#na.rm = TRUE
+
+water_chem
+
+water_chem_clean <- water_chem_nine_nine |> 
+  mutate(across(everything(), ~ replace(., . == -999, NA))) |> 
+  select(-tpc_u_m, -tpn_u_m,  -tpp_u_m, -tss_mgper_liter) |>
+  rename(
+    nh4 = nh4_u_m,
+    no3 = no3_u_m,
+    po4 = po4_u_m,
+    tdn = tdn_u_m,
+    tdp = tdp_u_m,
+    spec_cond = spec_cond_u_spercm
+  )
+
+ sum(water_chem_nine_nine$spec_cond_u_spercm == -999)
+
+ ggplot(water_chem_nine_nine, aes(x = spec_cond_u_spercm)) +
+ geom_boxplot() 
+ 
+ unique(water_chem_clean$site_code)
+   
+```
+"RG01": Refugio Creek 
+"AB00": Arroyo Burro 
+"MC06": Mission Creek at Rocky Nook 
+"MC00":Mission Creek at Montecito St 
+"HO00":Arroyo Hondo Creek 
+"RS02":Rattlesnake Creek 
+"GV01":Gaviota Creek 
+"AT07":Atascadero Creek 
+"DV01":Devereaux Slough 
+"BC02":Bell Canyon Creek 
+"ON02":San Onofre Creek 
+"TO02":Tecolote Creek 
+"SP02":San Pedro Creek
+
+
+
+# Omitted columns
+
+These four metrics were chosen to be omitted from the analysis: Total Particulate Carbon: **tpc_u_m**, Total Particulate Nitrogen: **tpn_u_m**,  Total particulate phosphorus: **tpp_u_m**, and Total Suspended Solids: **tss_mgper_liter**
+
+All four of these metrics have a median value of -999 meaning that at least half of the values would be converted to NA and because of the necessity to occlude NA values due to the nature of analysis. tpc_u_m tpn_u_m  tpp_u_m  tss_mgper_liter
+
+
+```{r}
+#| output: false
+
+water_chem_long <- water_chem_clean %>%
+  select(-timestamp_local) |>
+  pivot_longer(cols = -site_code, names_to = 'variables', values_to = 'value') |> drop_na()
+
+ggplot(water_chem_long, aes(x = value)) +
+  geom_histogram() +
+  facet_grid(site_code ~ variables, scales = 'free')
+
+
+```
+
+```{r}
+#| output: false
+
+#look at specific nutrients and site
+ggplot(water_chem_clean) +
+  geom_point(aes(x = nh4, y = no3, color = site_code),
+             size = 3, alpha = 0.7)
+
+# visualize total dissolved nutrients and solids
+ggplot(water_chem_clean) +
+  geom_point(aes(x = tdn, y = tdp, color = site_code),
+             size = 3, alpha = 0.7)
+
+#observe if time has anything to do with anything
+
+ggplot(water_chem_clean) +
+  geom_point(aes(x = timestamp_local, y = tdp, color = site_code),
+             size = 3, alpha = 0.7)
+```
+
+create a dataframe of mean values for each site
+```{r}
+# Drop rows where any of the measurements are missing and create mean values for each site
+water_chem_mean <- water_chem_clean %>% 
+  select(-timestamp_local) |>
+  group_by(site_code) %>%  # Group data by 'site_code'
+  summarise(
+    nh4 = mean(nh4, na.rm = TRUE),
+    no3 = mean(no3, na.rm = TRUE),
+    po4 = mean(po4, na.rm = TRUE),
+    tdn = mean(tdn, na.rm = TRUE),
+    tdp = mean(tdp, na.rm = TRUE),
+    spec_cond = mean(spec_cond, na.rm = TRUE)) |>
+ ungroup()
+
+
+
+```
+
+
+
+
+```{r}
+
+# Only keep the columns for the measurements, then SCALE them
+water_scale <- water_chem_mean %>% 
+  select(-site_code) %>% 
+  scale() 
+
+rownames(water_scale) <- water_chem_mean$site_code
+
+```
+
+
+```{r}
+
+# Compute dissimilarity values (Euclidean distances):
+euc_distance <- dist(water_scale, method = "euclidean")
+
+```
+
+```{r}
+
+# Hierarchical clustering (complete linkage)
+water_complete <- hclust(euc_distance, method = "complete" )
+
+# Plot it (base plot):
+p_complete <- ggdendrogram(water_complete, rotate = TRUE) +
+  theme_minimal() + 
+  labs(x = "Site", title = "Complete Linkage", y = NULL) +  
+    theme(
+    axis.text.x = element_text(hjust = 1, size = 12, face = "bold"),  # Rotate x-axis labels, adjust size
+    axis.text.y = element_text(size = 12, face = "bold"),  # Increase size of y-axis labels
+    axis.title = element_text(size = 14, face = "bold"),  # Increase axis title size
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),  # Make title larger and center it
+    panel.grid.major = element_blank(),  # Remove major gridlines
+    panel.grid.minor = element_blank(),  # Remove minor gridlines
+    plot.background = element_rect(fill = "white", color = "white")  # Set background to white
+  )
+
+
+```
+
+
+```{r}
+
+# Hierarchical clustering (single linkage)
+water_single <- hclust(euc_distance, method = "single" )
+
+# Plot single
+
+p_single <- ggdendrogram(water_single, rotate = TRUE) +
+  theme_minimal() + 
+  labs(x = "Site", title = "Single Linkage", y = NULL) +  
+  theme(
+    axis.text.x = element_text(hjust = 1, size = 12, face = "bold"),  # Rotate x-axis labels, adjust size
+    axis.text.y = element_text(size = 12, face = "bold"),  # Increase size of y-axis labels
+    axis.title = element_text(size = 14, face = "bold"),  # Increase axis title size
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),  # Make title larger and center it
+    panel.grid.major = element_blank(),  # Remove major gridlines
+    panel.grid.minor = element_blank(),  # Remove minor gridlines
+    plot.background = element_rect(fill = "white", color = "white")  # Set background to white
+  )
+
+
+```
+
+Change the Site_code names to the real names.... 
+
+```{r}
+# Compare the two dendrograms side by side
+p_complete + p_single + plot_layout(ncol = 2)
+```
+
+
+
+3.	A professional looking dendrogram that appears (with a caption) in your rendered HTML.  
+
+4.	Optional: rerun the dendrogram using a single linkage method, and include a tanglegram (in addition to your pro-quality dendrogram) to show how the different linkage changes the clustering.
+
+
+
+
+
+5.	A brief summary (nicely formatted and professionally written bulletpoints are fine) highlighting some major takeaways from your hierarchical clustering analysis that can be gleaned from the dendrogram(s).
+
+6.	Optional: Consider including a photo or image that is relevant to your analysis.  Consider applying a Bootswatch theme to your document (theme: themename in the Quarto document header)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Task 1 (Individual): Agglomerative hierarchical clustering
+
+For Task 1, use hierarchical clustering by complete linkage to create a dendrogram showing multivariate clustering for water chemistry by site.
+
+To perform hierarchical clustering by site, you’ll want to make a data frame that has a single summary row per site (e.g. based on means from all observations at that site), then calculate the Euclidean distance before performing complete linkage agglomerative hierarchical clustering. 
+
+
+NOTES: 
+
+•	Make sure you convert -999 values to NA (see documentation for read_csv).
+
+•	Note that this dataset contains a lot of NAs.  There are many ways to account for missing values: listwise deletion (drop any observation that does not have complete data) before summarizing; summarizing (with na.rm = TRUE) then dropping any resulting NA rows; or dropping columns with lots of NAs as they don’t provide much information.
+
+o	Here, identify columns with lots of NA values (e.g., > 50%) (e.g.: summary()) and drop them from the analysis.
+
+o	Then decide on either listwise deletion or summarizing (with na.rm = TRUE) on the resulting dataset after excluding low-information variables.
+
+o	Explain your process clearly, including why you decided one way or the other.
+
+•	If you have a dataset that you are more interested in exploring with hierarchical clustering, you are welcome to use an alternative dataset (and alternate linkage method) of your choosing instead. 
+Create and submit a finalized HTML (rendered from .qmd) that includes: 
+
+1.	An overview section with subsections that briefly summarize the dataset (this should include a well formatted data citation), the purpose of your analysis, and a pseudocode outline of the steps of your analysis.  Your writeup should look and feel professional in style, tone, and substance.
+
+2.	All code, including attached packages, should be included using code-folding.  Make sure to suppress any messages & warnings. Set embed-resources to be true so your HTML is self-contained!
+
+3.	A professional looking dendrogram that appears (with a caption) in your rendered HTML.  
+
+4.	Optional: rerun the dendrogram using a single linkage method, and include a tanglegram (in addition to your pro-quality dendrogram) to show how the different linkage changes the clustering.
+
+5.	A brief summary (nicely formatted and professionally written bulletpoints are fine) highlighting some major takeaways from your hierarchical clustering analysis that can be gleaned from the dendrogram(s).
+
+6.	Optional: Consider including a photo or image that is relevant to your analysis.  Consider applying a Bootswatch theme to your document (theme: themename in the Quarto document header)
+
+
+
