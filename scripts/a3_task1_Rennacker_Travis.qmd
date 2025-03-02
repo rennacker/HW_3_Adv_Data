@@ -1,5 +1,5 @@
 ---
-title: "HW_3_part_1"
+title: "Hierarchical Clustering Analysis for Water Sheds in Santa Barbara County"
 author: "Travis Rennacker"
 format: 
   html: 
@@ -15,7 +15,31 @@ execute:
  
 # Overview  
  
-1.	An overview section with subsections that briefly summarize the dataset (this should include a well formatted data citation), the purpose of your analysis, and a pseudocode outline of the steps of your analysis.  Your writeup should look and feel professional in style, tone, and substance.
+**Citation**: Santa Barbara Coastal LTER and J. Melack. 2019. SBC LTER: Land: Stream chemistry in the Santa Barbara Coastal drainage area, ongoing since 2000 ver 16. Environmental Data Initiative. https://doi.org/10.6073/pasta/67a558a24ceed9a0a5bf5e46ab841174. 
+
+This analysis will use Hierarchical Clustering to create associations from Water Chemistry 
+
+The data used in this analysis was collected by Santa Barbara Coastal LTER and catalogs water chemistry for major watersheds in the Santa Barbara area at key locations. Site codes were translated to water way names for clearer understanding of locations and associations. The data used for this analysis was taken from 2000-2018. We will use  NH4, NO3, PO4, Total Dissolved Nutrients (TDN), Total Dissolved Particulate (TDP), Specific Conductivity (spec_cond) to perform our analysis. Euclidean Distances will be used to cluster results based on Complete Linkage and Single Linkage. 
+
+# Psuedo Code
+
+1. Import Data 
+
+  - Clean data set and perform name adjustments
+  
+  - EDA of raw data
+  
+2. Drop Variables with low impact for better analysis
+
+3. Perform Hierarchical Clustering
+  
+  - Scale the data
+  
+  - Calculate Euclidean distances from mean values of each variable
+  
+  - Use Complete Linkage (smallest maximum distance) to form clusters
+  
+  - Use Single Linkage (smallest distance) to form clusters
 
 
 
@@ -33,13 +57,16 @@ library(ggdendro)
 
 ```
 
+### Import .csv file and EDA
 
+#### Import .csv
 ```{r}
 water_chem_raw <- read_csv(here("data", "sbc_lter_registered_stream_chemistry.csv"))
 
 water_chem_nine_nine <- water_chem_raw |> janitor::clean_names()
 ```
 
+Clean up data frame and adjust names
 ```{r}
 #| output: false 
 
@@ -64,7 +91,8 @@ water_chem_clean <- water_chem_nine_nine |>
     tdn = tdn_u_m,
     tdp = tdp_u_m,
     spec_cond = spec_cond_u_spercm
-  )
+  ) |>
+  janitor::clean_names() 
 
  sum(water_chem_nine_nine$spec_cond_u_spercm == -999)
 
@@ -74,29 +102,25 @@ water_chem_clean <- water_chem_nine_nine |>
  unique(water_chem_clean$site_code)
    
 ```
-"RG01": Refugio Creek 
-"AB00": Arroyo Burro 
-"MC06": Mission Creek at Rocky Nook 
-"MC00":Mission Creek at Montecito St 
-"HO00":Arroyo Hondo Creek 
-"RS02":Rattlesnake Creek 
-"GV01":Gaviota Creek 
-"AT07":Atascadero Creek 
-"DV01":Devereaux Slough 
-"BC02":Bell Canyon Creek 
-"ON02":San Onofre Creek 
-"TO02":Tecolote Creek 
-"SP02":San Pedro Creek
+
+
+### Omitted Columns Explanation
+
+These four metrics were chosen to be omitted from the analysis: 
+
+- Total Particulate Carbon: **tpc_u_m**
+
+- Total Particulate Nitrogen: **tpn_u_m**
+
+- Total particulate phosphorus: **tpp_u_m**
+
+- Total Suspended Solids: **tss_mgper_liter**
+
+All four of these metrics have a median value of -999. At least half of the values would be converted to NA and because of the necessity to occlude NA values for scaling and euclidean distance calculation the above four columns were omitted from analysis. 
 
 
 
-# Omitted columns
-
-These four metrics were chosen to be omitted from the analysis: Total Particulate Carbon: **tpc_u_m**, Total Particulate Nitrogen: **tpn_u_m**,  Total particulate phosphorus: **tpp_u_m**, and Total Suspended Solids: **tss_mgper_liter**
-
-All four of these metrics have a median value of -999 meaning that at least half of the values would be converted to NA and because of the necessity to occlude NA values due to the nature of analysis. tpc_u_m tpn_u_m  tpp_u_m  tss_mgper_liter
-
-
+### Further EDA
 ```{r}
 #| output: false
 
@@ -110,6 +134,7 @@ ggplot(water_chem_long, aes(x = value)) +
 
 
 ```
+ 
 
 ```{r}
 #| output: false
@@ -131,46 +156,113 @@ ggplot(water_chem_clean) +
              size = 3, alpha = 0.7)
 ```
 
-create a dataframe of mean values for each site
+# Hierarchical Clustering
+
+#### Calculate mean values of all variables by site code and adjust site codes to common names
+
+Converted site codes to water way names:
+
+"RG01": Refugio Creek 
+
+"AB00": Arroyo Burro 
+
+"MC06": Mission Creek at Rocky Nook 
+
+"MC00":Mission Creek at Montecito St 
+
+"HO00":Arroyo Hondo Creek 
+
+"RS02":Rattlesnake Creek 
+
+"GV01":Gaviota Creek 
+
+"AT07":Atascadero Creek 
+
+"DV01":Devereaux Slough 
+
+"BC02":Bell Canyon Creek 
+
+"ON02":San Onofre Creek 
+
+"TO02":Tecolote Creek 
+
+"SP02":San Pedro Creek
+
 ```{r}
+#| output: false
+
+
 # Drop rows where any of the measurements are missing and create mean values for each site
+
 water_chem_mean <- water_chem_clean %>% 
-  select(-timestamp_local) |>
-  group_by(site_code) %>%  # Group data by 'site_code'
+  select(-timestamp_local) |>             # Remove 'timestamp_local' column
+  group_by(site_code) %>%              # Group data by 'site_code'
   summarise(
-    nh4 = mean(nh4, na.rm = TRUE),
+    nh4 = mean(nh4, na.rm = TRUE),         #Find mean values for each variable by site
     no3 = mean(no3, na.rm = TRUE),
     po4 = mean(po4, na.rm = TRUE),
     tdn = mean(tdn, na.rm = TRUE),
     tdp = mean(tdp, na.rm = TRUE),
-    spec_cond = mean(spec_cond, na.rm = TRUE)) |>
- ungroup()
+    spec_cond = mean(spec_cond, na.rm = TRUE)) |> 
+  ungroup() |>  
+  mutate(                                    # Translate site_codes to creek names for recognition 
+    site_code = case_when(
+      site_code == "RG01" ~ "Refugio_Creek",
+      site_code == "AB00" ~ "Arroyo Burro",
+      site_code == "MC06" ~ "Mission Creek at Rocky Nook",
+      site_code == "MC00" ~ "Mission Creek at Montecito St",
+      site_code == "HO00" ~ "Arroyo Hondo Creek",
+      site_code == "RS02" ~ "Rattlesnake Creek",
+      site_code == "GV01" ~ "Gaviota Creek",
+      site_code == "AT07" ~ "Atascadero Creek",
+      site_code == "DV01" ~ "Devereaux Slough",
+      site_code == "BC02" ~ "Bell Canyon Creek",
+      site_code == "ON02" ~ "San Onofre Creek",
+      site_code == "TO02" ~ "Tecolote Creek",
+      site_code == "SP02" ~ "San Pedro Creek",
+    )
+  )
 
+  
+# Little more EDA of mean values for variables by Site
+ggplot(water_chem_mean) +
+  geom_point(aes(x = tdn, y = tdp, color = site_code),
+             size = 3, alpha = 0.7)
 
+ggplot(water_chem_mean) +
+  geom_point(aes(x = nh4, y = no3, color = site_code),
+             size = 3, alpha = 0.7)
 
 ```
 
 
-
+#### Scaling 
 
 ```{r}
 
-# Only keep the columns for the measurements, then SCALE them
+# Only keep the columns for the measurements, then Scale the numeric variables
 water_scale <- water_chem_mean %>% 
   select(-site_code) %>% 
   scale() 
+
+# add the site names in the row position 
 
 rownames(water_scale) <- water_chem_mean$site_code
 
 ```
 
-
+#### Calculate Euclidean distances
+ 
 ```{r}
 
 # Compute dissimilarity values (Euclidean distances):
+
 euc_distance <- dist(water_scale, method = "euclidean")
 
 ```
+
+
+#### Complete Linkage Plot
 
 ```{r}
 
@@ -180,20 +272,22 @@ water_complete <- hclust(euc_distance, method = "complete" )
 # Plot it (base plot):
 p_complete <- ggdendrogram(water_complete, rotate = TRUE) +
   theme_minimal() + 
-  labs(x = "Site", title = "Complete Linkage", y = NULL) +  
+  labs(x = NULL, title = "Complete Linkage", y = NULL) +  
     theme(
-    axis.text.x = element_text(hjust = 1, size = 12, face = "bold"),  # Rotate x-axis labels, adjust size
-    axis.text.y = element_text(size = 12, face = "bold"),  # Increase size of y-axis labels
-    axis.title = element_text(size = 14, face = "bold"),  # Increase axis title size
-    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),  # Make title larger and center it
-    panel.grid.major = element_blank(),  # Remove major gridlines
-    panel.grid.minor = element_blank(),  # Remove minor gridlines
-    plot.background = element_rect(fill = "white", color = "white")  # Set background to white
+    axis.text.x = element_text(hjust = 1, size = 12, face = "bold"),  
+    axis.text.y = element_text(size = 12, face = "bold"),  
+    axis.title = element_text(size = 14, face = "bold"), 
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5), 
+    panel.grid.major = element_blank(),  
+    panel.grid.minor = element_blank(),  
+    plot.background = element_rect(fill = "cornsilk", color = "cornsilk")  # Background to cornsilk for clarity
   )
 
 
 ```
 
+
+#### Single Linkage Plot
 
 ```{r}
 
@@ -204,87 +298,59 @@ water_single <- hclust(euc_distance, method = "single" )
 
 p_single <- ggdendrogram(water_single, rotate = TRUE) +
   theme_minimal() + 
-  labs(x = "Site", title = "Single Linkage", y = NULL) +  
+  labs(x = NULL, title = "Single Linkage", y = NULL) +  
   theme(
-    axis.text.x = element_text(hjust = 1, size = 12, face = "bold"),  # Rotate x-axis labels, adjust size
-    axis.text.y = element_text(size = 12, face = "bold"),  # Increase size of y-axis labels
-    axis.title = element_text(size = 14, face = "bold"),  # Increase axis title size
-    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),  # Make title larger and center it
-    panel.grid.major = element_blank(),  # Remove major gridlines
-    panel.grid.minor = element_blank(),  # Remove minor gridlines
-    plot.background = element_rect(fill = "white", color = "white")  # Set background to white
+    axis.text.x = element_text(hjust = 1, size = 12, face = "bold"),  
+    axis.text.y = element_text(size = 12, face = "bold"), 
+    axis.title = element_text(size = 14, face = "bold"),  
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),  
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),  
+    plot.background = element_rect(fill = "lightblue", color = "lightblue")  # Background to lightblue for clarity
   )
 
 
 ```
 
-Change the Site_code names to the real names.... 
+# Dendogram
 
-```{r}
+```{r fig.height=12, out.width="100%"}
+#| fig-cap: "**Figure 1**, Complete Linkage Dendogram and Single Linkage Dendogram. The data for this analysis was taken from Santa Barbara watersheds from 2000-2018 and monitored for water qauality thorugh 6 metrics inlcuding: NH4, NO3, PO4, Total Dissolved Nutrients, Total Dissolved Particulate, Specific Conductivity. Euclidean Distance of means was used to create the clustering following complete and single linkage."
+
 # Compare the two dendrograms side by side
-p_complete + p_single + plot_layout(ncol = 2)
+p_complete + p_single + plot_layout(ncol = 1)
 ```
 
 
-
-3.	A professional looking dendrogram that appears (with a caption) in your rendered HTML.  
-
-4.	Optional: rerun the dendrogram using a single linkage method, and include a tanglegram (in addition to your pro-quality dendrogram) to show how the different linkage changes the clustering.
+# Summary 
 
 
+- These associations carry weight, due to the 18 years of the recorded data. 
+
+- Conceptually the transverse mountain range that defines Santa Barbara water sheds should also define the relationships, and it does, up to a point. 
+
+- Many of the grouping appear to follow geographical boundaries. Acceptions included in the Complete Linkage are Rattle Snake Creek (Monticeto) and Telecote Creek (Goleta). Both are linked with waterways further west in the Gaviota region. This points to some underlying similarities that could be explored with further analysis. 
+
+- Both Devereaux Slough and Bell Canyon show the least association with the rest of the groupings. Conceptually this makes sense because they are both smaller water sheds in West Goleta. Both carry different anthropogenic footprints. Devereaux Slough is adjacent to the Santa Barbara International Airport and the Community of Isla Vista (one of the most densely populated areas in California) and had the highest mean (by a large ) for Total Dissolved Solids. Bell Canyon is located in an agricultural area and had the highest mean (by a large margin) for Total Dissolved Nutrients.  
+
+
+These four metrics were chosen to be omitted from the analysis: 
+
+       - Total Particulate Carbon: **tpc_u_m**
+
+       - Total Particulate Nitrogen: **tpn_u_m**
+
+       - Total particulate phosphorus: **tpp_u_m**
+
+       - Total Suspended Solids: **tss_mgper_liter**
+
+All four of these metrics have a median value of -999. At least half of the values would be converted to NA and because of the necessity to occlude NA values for scaling and euclidean distance calculation the above four columns were omitted from analysis. Further analysis could be heightened through the inclusion of these variables. 
 
 
 
-5.	A brief summary (nicely formatted and professionally written bulletpoints are fine) highlighting some major takeaways from your hierarchical clustering analysis that can be gleaned from the dendrogram(s).
-
-6.	Optional: Consider including a photo or image that is relevant to your analysis.  Consider applying a Bootswatch theme to your document (theme: themename in the Quarto document header)
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-Task 1 (Individual): Agglomerative hierarchical clustering
-
-For Task 1, use hierarchical clustering by complete linkage to create a dendrogram showing multivariate clustering for water chemistry by site.
-
-To perform hierarchical clustering by site, you’ll want to make a data frame that has a single summary row per site (e.g. based on means from all observations at that site), then calculate the Euclidean distance before performing complete linkage agglomerative hierarchical clustering. 
-
-
-NOTES: 
-
-•	Make sure you convert -999 values to NA (see documentation for read_csv).
-
-•	Note that this dataset contains a lot of NAs.  There are many ways to account for missing values: listwise deletion (drop any observation that does not have complete data) before summarizing; summarizing (with na.rm = TRUE) then dropping any resulting NA rows; or dropping columns with lots of NAs as they don’t provide much information.
-
-o	Here, identify columns with lots of NA values (e.g., > 50%) (e.g.: summary()) and drop them from the analysis.
-
-o	Then decide on either listwise deletion or summarizing (with na.rm = TRUE) on the resulting dataset after excluding low-information variables.
-
-o	Explain your process clearly, including why you decided one way or the other.
-
-•	If you have a dataset that you are more interested in exploring with hierarchical clustering, you are welcome to use an alternative dataset (and alternate linkage method) of your choosing instead. 
-Create and submit a finalized HTML (rendered from .qmd) that includes: 
-
-1.	An overview section with subsections that briefly summarize the dataset (this should include a well formatted data citation), the purpose of your analysis, and a pseudocode outline of the steps of your analysis.  Your writeup should look and feel professional in style, tone, and substance.
-
-2.	All code, including attached packages, should be included using code-folding.  Make sure to suppress any messages & warnings. Set embed-resources to be true so your HTML is self-contained!
-
-3.	A professional looking dendrogram that appears (with a caption) in your rendered HTML.  
-
-4.	Optional: rerun the dendrogram using a single linkage method, and include a tanglegram (in addition to your pro-quality dendrogram) to show how the different linkage changes the clustering.
-
-5.	A brief summary (nicely formatted and professionally written bulletpoints are fine) highlighting some major takeaways from your hierarchical clustering analysis that can be gleaned from the dendrogram(s).
-
-6.	Optional: Consider including a photo or image that is relevant to your analysis.  Consider applying a Bootswatch theme to your document (theme: themename in the Quarto document header)
 
 
 
