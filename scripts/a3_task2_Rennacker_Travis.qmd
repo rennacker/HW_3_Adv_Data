@@ -1,5 +1,5 @@
 ---
-title: "a3_task2_Rennacker_Travis"
+title: "Random Forest Analysis For Forest Fires"
 author: "Travis Rennacker"
 format: 
   html: 
@@ -13,58 +13,225 @@ execute:
   message: false
 ---
 
+# Overview 
+
+**Citation:** Cortez, P., & Morais, A.. A Data Mining Approach to Predict Forest Fires Using Meteorological Data. Department of Information Systems/R&D Algoritmi Centre, University of Minho. Retrieved from http://www.dsi.uminho.pt/~pcortez
+
+A brilliant analytical paper reviewed a large data set of fires in Portugal to find statistical relevance from various factors. This analysis will engage with the same analysis and attempt to compare tuning of the random forest aspect from Cortez et al. As noted in the above paper, the highly important environmental variables including rain, relative humidity, wind and tempurature will be used for this analysis. They will be compared with the Mean Absolute Error Metric. 
+
+**Environmental Variables used in the Random Forest:**
+
+- (temp): Outside temperature (in ◦C)
+
+- (rh): Outside relative humidity (in %)
+
+- (wind): Outside wind speed (in km/h)
+
+- (rain): Outside rain (in mm/m2)
+
+
+
+#### library 
+```{r}
+library(tidymodels)
+library(tidyverse)
+library(ggcorrplot)
+library(knitr)
+library(kableExtra)
+library(here)
+
+```
+
+# Random Forest
+
+#### Import Data
+
+Import the data using read_csv(). Convert the spatial and temporal variables to factors. Log(x+1) transform the burned hectares data
 ```{r}
 forest_fire_raw <- read_csv(here("data", "forestfires.csv"))
+
+forest_fire <- forest_fire_raw |> janitor::clean_names() |> mutate(across(c(month, day), as.factor)) |> mutate(l_area = log1p(area))
+
+```
+#### Split data for analysis
+```{r}
+
+set.seed(9872)
+
+forest_split <- initial_split(forest_fire, prop = 0.75) #maintains balance of data through strata across our test and train via prct of risk level
+
+f_train <- training(forest_split)
+
+f_test <- testing(forest_split)
+
+```
+
+#### Create the recipe 
+```{r}
+
+f_recipe <- recipe(l_area ~ temp + rain + wind + rh + month, data = f_train) |> 
+  step_zv(all_predictors()) |> 
+  step_corr(all_numeric_predictors(), threshold = 0.9) #all_numeric_predictors() 
+
+```
+
+#### Set Random Forest Parimeters
+
+```{r}
+
+rf_spec <- rand_forest(trees = 1000, #thousand trees is a good default
+            mtry = tune(), 
+            min_n = tune())|> #hyper tuning preperation, r will get them later
+  set_engine("ranger") |>
+  set_mode("regression") #still want classificaiton at the end
+ 
+rf_workflow <- workflow() |>
+  add_recipe(f_recipe) |>
+  add_model(rf_spec)
+
+```
+
+
+#### Create Grid and Tuning
+
+```{r}
+
+ #expand grid (create vectors and makes a matrix) all possible combinations of variables 
+rf_grid= expand_grid(   
+  mtry = seq(1,4, by=1),
+  min_n = seq(2,8, by=2)
+)
+
+rf_res <- tune_grid(
+  rf_workflow,
+  resamples = vfold_cv(f_train, v = 5),
+  grid = rf_grid,
+  metrics = metric_set(mae),
+  control=control_grid(save_workflow = TRUE)  # This is useful when finalizing the model
+)
+
+```
+
+
+#### Finalize Work Flow 
+```{r}
+rf_best<-select_best(rf_res,metric='mae')
+
+rf_final<-finalize_model(rf_spec,rf_best)
+
+# finalize workflow
+
+final_wf <- workflow() %>%
+  add_recipe(f_recipe) %>%
+  add_model(rf_final)
+
+final_res <- final_wf %>%
+  last_fit(forest_split)
+```
+
+
+#### Predictions 
+
+```{r}
+# Collect predictions
+predictions <- final_res %>%
+  collect_predictions()
+
+```
+
+
+#### Fit Best
+
+```{r}
+rf_best<-select_best(rf_res,metric='mae')
+
+rf_final<-finalize_model(rf_spec,rf_best)
+
+# finalize workflow
+
+final_wf <- workflow() %>%
+  add_recipe(f_recipe) %>%
+  add_model(rf_final)
+
+# Collect predictions
+predictions <- final_res %>%
+  collect_predictions()
+
+```
+
+
+#### Undo Log Transformation 
+
+```{r}
+
+# Transform predictions and actual values back to non-log scale
+predictions <- predictions %>%
+  mutate(.pred_area = exp(.pred) - 1,
+         l_area = exp(l_area) - 1)
+
+# Calculate MAE (Mean Absolute Error) on the original scale
+mae_value <- mae(predictions, truth = l_area, estimate = .pred_area)
+
 ```
 
 
 
-For Task 2, we’re going to recreate results from an early paper on random forests. We will tune a regression random forest that will predict the amount of forest burned given a set of climate and “spatial variables”. 
+```{r}
+#| output: false
 
-Please read the paper to get a breakdown of all the variables, analysis steps, and grouping of variables. 
+mae_value
 
-Include in your knitted html a data citation and brief description of the data and variables. In the paper, you can ignore the descriptions on SVM and NN. They are other ML algorithms not covered in class. 
-
-Import the data using read_csv(). Convert the spatial and temporal variables to factors. Log(x+1) transform the burned hectares data
-
-Choose One of the variable groupings to build a random forest model using tidymodels.
-
-STFWI: All features
-STM: Spatial, temporal, and environmental variables
-FWI: Only fire index variables 
-M: Only the environmental variables
-
-(Optional: Do each grouping and compare to a multiple regression. Try using purrr or for loops to knock it out faster)
-
-Tune your model by selecting the best performing mtry and min_n random forests variable. Select the best performing model based on the Mean Absolute Error Metric (mae in tidymodels, called MAD in the paper). Be judicious in the number of grids to tune over! Keep it small (~12) otherwise it will take a while to render your html!
-
-Finalize the best performing model. Then predict the outcomes on the testing data. Compare your results to those in the paper (table 3). Did tuning the random forest yield better results? Hint: You will need to transform the predictions and area values back to non-log values in order to compare to the paper. Mutate each column, then use yardstick::mae() to calculate the mae value used in the paper.
-
-Conduct a variable importance analysis using the vip package on your final model. Which variables contribute the most to your model predictions? Do these make sense?
-
-Create and submit a finalized HTML (rendered from .qmd) that includes: 
-
-7.	An overview section with subsections that briefly summarize the dataset (this should include a well formatted data citation and the purpose of your analysis  Your writeup should look and feel professional in style, tone, and substance. Make it clear which groups of variables you will be analyzing.
-
-8.	All code, including attached packages, should be included using code-folding.  Make sure to suppress any messages & warnings. Set embed-resources to be true so your HTML is self-contained!
-
-9.	A well designed table of the results of the random forests.
-
-10.	A graph depicting the variable importance of your selected model.
-
-11.	A brief summary (nicely formatted and professionally written bulletpoints are fine) highlighting some major takeaways from your variable importance diagrams.
-
-12.	Optional: Consider including a photo or image that is relevant to your analysis.  Consider applying a Bootswatch theme to your document (theme: themename in the Quarto document header)
-Task 3: Shiny app term project
-For this task, update your Shiny app.  Make sure to push your changes to Github!
-
-•	Work on finalizing the Introduction/Summary/Overview page of your app
-
-•	Update so that all widgets and reactive outputs (tables, graphs, maps, etc.) are functioning correctly
-
-•	Start finalizing the little things (citations, formatting graphs/tables & figures), work on usability for an app user, make this nice & professional to look at 
-That’s it. Nathan should be added to your app repo already, so will check progress. The idea is that by the time you submit this assignment, you should have the last two weeks to work mostly on making it awesome (adding bells & whistles, fine-tuning, theming, etc.). 
+```
 
 
+#### Table for Comparison
+
+```{r}
+
+#| fig-cap: "**Table 1.** Mae Results from Tuned Results and Paper"
+
+# Create the data frame
+mae_comparison <- data.frame(
+  Model = c("Tuned RF", "Paper RF"),
+  MAE_Value = c(7.28, 12.93)
+)
+
+# Print the table with pretty styling
+mae_comparison %>%
+  kable("html", col.names = c("Model", "MAE Value")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "responsive"),
+                font_size = 14, 
+                full_width = F) %>%
+  column_spec(1, bold = TRUE) %>%
+  column_spec(2, color = "black", background = "lightgray")
+
+```
+
+## Tuned Random Forest Mae 
+
+```{r}
+#| fig-cap: "**Figure 1**, Tuned Random Forest Variable Relevance for Forest Fire Prediction."
+
+rf_final |>
+  set_engine('ranger', importance = 'permutation') |>  # Permutation importance
+  fit(l_area ~ ., data = juice(prep(f_recipe))) |>  # Fit model on preprocessed data
+  vip::vip(geom = 'col') +  # Create bar plot for variable importance
+  scale_x_discrete(labels = function(x) gsub("wind", "Wind Speed", gsub("rain", "Rainfall", gsub("temp", "Temperature", gsub("rh", "Relative Humidity", x))))) +  # Rename variables
+  labs(title = "Variable Importance (Random Forest MAE)", x = "Predictor Variables") +  # Add title and axis labels
+  theme_minimal() +  # Clean background
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
+        plot.title = element_text(size = 16, face = "bold"),  # Bold title
+        axis.title = element_text(size = 12),  # Axis title size
+        axis.text = element_text(size = 10))  # Axis text size
+```
 
 
+# Summary 
+
+ - Tempurature was the most important variable with the tuned analysis\
+ 
+ - Tuning the model created a better model
+  
+ - Conceptually, all the environmental variables should help predict forest fires. According to the tuned model, tempurature and RH were the leading factors. Using these two variables from atmospheric climate projections, could lead to a greater forest fire resilence through strategic planning. 
+ 
+ 
